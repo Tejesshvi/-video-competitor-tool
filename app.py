@@ -26,19 +26,44 @@ def analyze():
     jobs[job_id] = {"status":"running","progress":0,"results":[],"error":None}
 
     def run():
-        results = []
-        for i, name in enumerate(all_names):
-            jobs[job_id]["progress"] = int((i/len(all_names))*90)
-            d = fetch_company_data(name)
-            d = add_fmt(d)
-            results.append(d)
-        scores = _rank_companies(results)
-        for r in results:
-            r["score"] = scores.get(r["company_name"], 0)
-        jobs[job_id]["results"]  = results
-        jobs[job_id]["status"]   = "done"
-        jobs[job_id]["progress"] = 100
-        jobs[job_id]["your_company"] = your_company
+        try:
+            results = []
+            for i, name in enumerate(all_names):
+                jobs[job_id]["progress"] = int((i/len(all_names))*90)
+                try:
+                    d = fetch_company_data(name)
+                    d = add_fmt(d)
+                except Exception as e:
+                    d = {"company_name": name, "channel_id": None, "channel_title": None,
+                         "channel_description": "", "channel_url": None, "channel_thumbnail": None,
+                         "subscriber_count": 0, "video_count": 0, "view_count": 0,
+                         "country": "N/A", "created_at": "N/A", "videos": [], "top_videos": [],
+                         "avg_views": 0, "avg_likes": 0, "avg_comments": 0,
+                         "upload_freq_per_week": 0, "topics": [], "score": 0,
+                         "subscriber_count_fmt": "0", "video_count_fmt": "0",
+                         "view_count_fmt": "0", "avg_views_fmt": "0",
+                         "avg_likes_fmt": "0", "avg_comments_fmt": "0",
+                         "error": f"Error fetching data: {str(e)}"}
+                results.append(d)
+            scores = _rank_companies(results)
+            for r in results:
+                r["score"] = scores.get(r["company_name"], 0)
+            jobs[job_id]["results"] = results
+            jobs[job_id]["status"] = "done"
+            jobs[job_id]["progress"] = 100
+            jobs[job_id]["your_company"] = your_company
+        except Exception as e:
+            jobs[job_id]["status"] = "done"
+            jobs[job_id]["progress"] = 100
+            jobs[job_id]["error"] = str(e)
+            jobs[job_id]["your_company"] = your_company
+            jobs[job_id]["results"] = [{"company_name": n, "error": str(e),
+                "channel_id":None,"channel_title":None,"subscriber_count":0,
+                "video_count":0,"view_count":0,"avg_views":0,"avg_likes":0,
+                "avg_comments":0,"upload_freq_per_week":0,"topics":[],"videos":[],
+                "top_videos":[],"score":0,"subscriber_count_fmt":"0",
+                "video_count_fmt":"0","view_count_fmt":"0","avg_views_fmt":"0",
+                "avg_likes_fmt":"0","avg_comments_fmt":"0"} for n in all_names]
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
