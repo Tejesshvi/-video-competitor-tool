@@ -1,11 +1,26 @@
-import os, json, threading
+import os, json, threading, io
+
+# Load .env file if present (always overwrites, .env takes priority)
+try:
+    with open(os.path.join(os.path.dirname(__file__), '.env')) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                k, v = line.split('=', 1)
+                os.environ[k.strip()] = v.strip()
+except FileNotFoundError:
+    pass
+
 from flask import Flask, render_template, request, jsonify, send_file
 from youtube_fetcher import fetch_company_data, add_fmt
 from report_generator import generate_pptx, _rank_companies
-import io
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET","mypromovideos-r2-secret")
+
+# Log API key status on startup (no key value shown)
+api_key = os.environ.get("YOUTUBE_API_KEY","")
+print(f"[STARTUP] YOUTUBE_API_KEY {'SET (' + str(len(api_key)) + ' chars)' if api_key else 'NOT SET'}")
 
 # In-memory job store
 jobs = {}
