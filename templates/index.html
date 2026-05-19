@@ -258,9 +258,13 @@ function renderResults(results, yourCompany) {
   sec.style.display='block';
   sec.innerHTML='';
   const ranked = [...results].sort((a,b)=>b.score-a.score);
+  const names=results.map(d=>d.company_name);
 
-  // ── Company cards ──────────────────────────────────────
-  let html=`<div class="section-title fade-in">📊 Company Snapshots</div>
+  // ── Build ALL html first, set innerHTML ONCE, then create charts ──
+  let html = '';
+
+  // Company cards
+  html+=`<div class="section-title fade-in">📊 Company Snapshots</div>
   <div class="section-sub">Live YouTube data for all companies analysed</div>
   <div class="cards-grid fade-in">`;
   ranked.forEach((d,i)=>{
@@ -283,11 +287,9 @@ function renderResults(results, yourCompany) {
     </div>`;
   });
   html+='</div>';
-  sec.innerHTML+=html;
 
-  // ── Charts ─────────────────────────────────────────────
-  const names=results.map(d=>d.company_name);
-  sec.innerHTML+=`<div class="divider"></div>
+  // Charts section
+  html+=`<div class="divider"></div>
   <div class="section-title">📈 Data Visualisation</div>
   <div class="section-sub">Comparative metrics across all companies</div>
   <div class="charts-grid fade-in">
@@ -297,20 +299,8 @@ function renderResults(results, yourCompany) {
     <div class="chart-card"><div class="chart-title">Avg Engagement Rate (%)</div><div class="chart-wrap"><canvas id="ch-eng"></canvas></div></div>
   </div>`;
 
-  const chartCfg=(id,data,label)=>new Chart(document.getElementById(id),{
-    type:'bar',data:{labels:names,datasets:[{label,data,backgroundColor:COLORS.slice(0,names.length),borderRadius:8,borderSkipped:false}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{x:{grid:{color:'rgba(255,255,255,.05)'},ticks:{color:'#7a8899',font:{size:11}}},
-              y:{grid:{color:'rgba(255,255,255,.05)'},ticks:{color:'#7a8899',font:{size:11}}}}}
-  });
-  chartCfg('ch-subs',results.map(d=>d.subscriber_count),'Subscribers');
-  chartCfg('ch-views',results.map(d=>d.avg_views),'Avg Views');
-  chartCfg('ch-freq',results.map(d=>d.upload_freq_per_week),'Videos/Week');
-  const avgEng=results.map(d=>{const vs=d.videos||[];return vs.length?+(vs.reduce((a,v)=>a+v.engagement_rate,0)/vs.length).toFixed(2):0;});
-  chartCfg('ch-eng',avgEng,'Engagement %');
-
-  // ── Top Videos ─────────────────────────────────────────
-  sec.innerHTML+=`<div class="divider"></div>
+  // Top Videos
+  html+=`<div class="divider"></div>
   <div class="section-title">▶ Top Performing Videos</div>
   <div class="section-sub">Top 5 videos by views for each company</div>`;
   results.forEach((d,ci)=>{
