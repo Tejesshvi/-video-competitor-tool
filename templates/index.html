@@ -368,6 +368,74 @@ function renderResults(results, yourCompany) {
     </div>
     <a class="btn-download" href="/download/${currentJobId}" download>⬇ Download .pptx Report</a>
   </div>`;
+
+  // Set the HTML to container
+  sec.innerHTML = html;
+
+  // Initialize visualisations using Chart.js
+  setTimeout(() => initCharts(results), 50);
+}
+
+function initCharts(results) {
+  const labels = results.map(d => d.company_name);
+  const subs = results.map(d => d.subscriber_count);
+  const views = results.map(d => d.avg_views);
+  const freq = results.map(d => d.upload_freq_per_week);
+  const eng = results.map(d => {
+    if (!d.videos || !d.videos.length) return 0;
+    const avg = d.videos.reduce((acc, v) => acc + v.engagement_rate, 0) / d.videos.length;
+    return parseFloat(avg.toFixed(2));
+  });
+
+  const chartConfigs = [
+    { id: 'ch-subs', label: 'Subscribers', data: subs, color: '#1a73e8' },
+    { id: 'ch-views', label: 'Avg Views', data: views, color: '#00c9a7' },
+    { id: 'ch-freq', label: 'Videos/Week', data: freq, color: '#ffd93d' },
+    { id: 'ch-eng', label: 'Engagement Rate (%)', data: eng, color: '#a29bf5' }
+  ];
+
+  chartConfigs.forEach(cfg => {
+    const el = document.getElementById(cfg.id);
+    if (!el) return;
+    new Chart(el, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: cfg.label,
+          data: cfg.data,
+          backgroundColor: cfg.color + '26', // ~15% opacity hex
+          borderColor: cfg.color,
+          borderWidth: 2,
+          borderRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#0d1b2a',
+            titleColor: '#e8edf5',
+            bodyColor: '#e8edf5',
+            borderColor: '#1e3050',
+            borderWidth: 1
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: '#1e3050' },
+            ticks: { color: '#7a8899', font: { family: 'Inter', size: 11 } }
+          },
+          y: {
+            grid: { color: '#1e3050' },
+            ticks: { color: '#7a8899', font: { family: 'Inter', size: 11 } }
+          }
+        }
+      }
+    });
+  });
 }
 
 function showFormError(msg){
