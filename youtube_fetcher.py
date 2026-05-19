@@ -1,124 +1,328 @@
-import os, re, requests, isodate
+import os, re
 from datetime import datetime, timezone
 from collections import Counter
 
+# ── Optional: use YouTube Data API if key is available, else fall back to yt-dlp ──
 API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyAFIGk-ALF8zMVgPBDvJJVcNWJF-mFjZ_g")
 BASE = "https://www.googleapis.com/youtube/v3"
 
-def _get(endpoint, params):
-    params["key"] = API_KEY
-    r = requests.get(f"{BASE}/{endpoint}", params=params, timeout=15)
-    r.raise_for_status()
-    return r.json()
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+def _safe_int(v, default=0):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
 
-def _fmt(n):
-    if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
-    if n >= 1_000: return f"{n/1_000:.1f}K"
+def _fmt_num(n):
+    n = _safe_int(n)
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n/1_000:.1f}K"
     return str(n)
 
-def _dur(s):
-    try: return int(isodate.parse_duration(s).total_seconds())
-    except: return 0
+def _extract_topics(titles, top_n=10):
+    STOP = {"the","a","an","and","or","in","on","at","to","for","of","is","are",
+            "how","why","what","with","this","that","from","my","we","our","your",
+            "it","its","by","be","was","were","has","have","not","but","get","you",
+            "i","me","us","they","them","he","she","his","her","do","did","will",
+            "can","new","all","one","more","about","up","out","over","vs","ft",
+            "feat","official","video","music","2023","2024","2025","ep","season"}
+    words = []
+    for t in titles:
+        for w in re.findall(r"[a-zA-Z]{3,}", t.lower()):
+            if w not in STOP:
+                words.append(w)
+    return [w for w, _ in Counter(words).most_common(top_n)]
 
-def search_channel(name):
-    d = _get("search", {"part":"snippet","q":name,"type":"channel","maxResults":5})
-    items = d.get("items", [])
-    if not items: return None
-    nl = name.lower()
-    for it in items:
-        t = it["snippet"]["channelTitle"].lower()
-        if nl in t or t in nl: return it
-    return items[0]
 
-def get_channel_details(cid):
-    d = _get("channels", {"part":"snippet,statistics,contentDetails","id":cid})
-    items = d.get("items", [])
-    return items[0] if items else {}
+# ─────────────────────────────────────────────────────────────────────────────
+# yt-dlp based fetching (no API key needed)
+# ─────────────────────────────────────────────────────────────────────────────
+def _fetch_via_ytdlp(company_name):
+    """Fetch channel data using yt-dlp — works without a YouTube API key."""
+    import yt_dlp
 
-def get_videos(playlist_id, max_results=50):
-    videos, token = [], None
-    while len(videos) < max_results:
-        p = {"part":"snippet","playlistId":playlist_id,"maxResults":min(50,max_results-len(videos))}
-        if token: p["pageToken"] = token
-        d = _get("playlistItems", p)
-        videos.extend(d.get("items",[]))
-        token = d.get("nextPageToken")
-        if not token: break
-    return videos
+    res = {
+        "company_name": company_name,
+        "channel_id": None, "channel_title": None, "channel_description": "",
+        "channel_url": None, "channel_thumbnail": None,
+        "subscriber_count": 0, "video_count": 0, "view_count": 0,
+        "country": "N/A", "created_at": "N/A",
+        "videos": [], "top_videos": [],
+        "avg_views": 0, "avg_likes": 0, "avg_comments": 0,
+        "upload_freq_per_week": 0, "topics": [], "error": None
+    }
 
-def get_stats(vids):
-    if not vids: return {}
-    d = _get("videos", {"part":"statistics,contentDetails,snippet","id":",".join(vids[:50])})
-    return {it["id"]: it for it in d.get("items",[])}
-
-STOP = {"the","a","an","is","in","on","at","for","to","of","and","or","with","how","why",
-        "what","this","that","are","you","your","we","i","it","its","be","by","from","as",
-        "was","were","has","have","do","does","did","my","our","will","can","just","all",
-        "but","not","more","about","they","their","its","video"}
-
-def fetch_company_data(company_name, max_videos=50):
-    res = {"company_name":company_name,"channel_id":None,"channel_title":None,
-           "channel_description":"","channel_url":None,"channel_thumbnail":None,
-           "subscriber_count":0,"video_count":0,"view_count":0,"country":"N/A",
-           "created_at":"N/A","videos":[],"top_videos":[],"avg_views":0,"avg_likes":0,
-           "avg_comments":0,"upload_freq_per_week":0,"topics":[],"error":None}
+    ydl_opts_search = {
+        "quiet": True, "no_warnings": True, "extract_flat": True,
+        "default_search": "ytsearch1", "skip_download": True,
+    }
+    # Search for the channel
     try:
-        si = search_channel(company_name)
-        if not si: res["error"] = f"No channel found for '{company_name}'"; return res
-        cid = si["snippet"]["channelId"]
-        ch = get_channel_details(cid)
-        if not ch: res["error"] = "Channel details not found"; return res
-        snip = ch.get("snippet",{}); stats = ch.get("statistics",{})
-        cd = ch.get("contentDetails",{})
-        res.update({
-            "channel_id": cid,
-            "channel_title": snip.get("title", company_name),
-            "channel_description": snip.get("description",""),
-            "channel_url": f"https://www.youtube.com/channel/{cid}",
-            "channel_thumbnail": snip.get("thumbnails",{}).get("default",{}).get("url",""),
-            "subscriber_count": int(stats.get("subscriberCount",0)),
-            "video_count": int(stats.get("videoCount",0)),
-            "view_count": int(stats.get("viewCount",0)),
-            "country": snip.get("country","N/A"),
-            "created_at": snip.get("publishedAt","N/A")[:10],
-        })
-        pl_id = cd.get("relatedPlaylists",{}).get("uploads")
-        if not pl_id: return res
-        items = get_videos(pl_id, max_videos)
-        vids = [it["snippet"]["resourceId"]["videoId"] for it in items if it.get("snippet",{}).get("resourceId",{}).get("videoId")]
-        vstats = get_stats(vids[:50])
-        evids, words = [], []
-        for it in items:
-            vid = it.get("snippet",{}).get("resourceId",{}).get("videoId")
-            if not vid: continue
-            si2 = vstats.get(vid, {}); st = si2.get("statistics",{}); snip2 = si2.get("snippet", it.get("snippet",{}))
-            views=int(st.get("viewCount",0)); likes=int(st.get("likeCount",0)); comments=int(st.get("commentCount",0))
-            title = snip2.get("title",""); pub = snip2.get("publishedAt","")[:10]
-            thumb = snip2.get("thumbnails",{}).get("medium",{}).get("url","") or snip2.get("thumbnails",{}).get("default",{}).get("url","")
-            eng = round((likes+comments)/views*100,2) if views else 0
-            evids.append({"id":vid,"title":title,"published":pub,"views":views,"likes":likes,
-                          "comments":comments,"engagement_rate":eng,"url":f"https://www.youtube.com/watch?v={vid}","thumbnail":thumb})
-            ws = re.sub(r"[^a-zA-Z\s]","",title.lower()).split()
-            words.extend([w for w in ws if w not in STOP and len(w)>3])
-        if evids:
-            evids.sort(key=lambda v:v["views"],reverse=True)
-            res["videos"]=evids; res["top_videos"]=evids[:5]
-            res["avg_views"]=round(sum(v["views"] for v in evids)/len(evids))
-            res["avg_likes"]=round(sum(v["likes"] for v in evids)/len(evids))
-            res["avg_comments"]=round(sum(v["comments"] for v in evids)/len(evids))
-            try:
-                dt=datetime.fromisoformat(snip.get("publishedAt","").rstrip("Z")).replace(tzinfo=timezone.utc)
-                weeks=max(1,(datetime.now(timezone.utc)-dt).days/7)
-                res["upload_freq_per_week"]=round(len(evids)/weeks,2)
-            except: pass
-            res["topics"]=[w for w,_ in Counter(words).most_common(10)]
-    except requests.exceptions.HTTPError as e:
-        res["error"]=f"API error {e.response.status_code}: {e.response.text[:200]}"
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+            search_url = f"ytsearch1:{company_name} official channel"
+            info = ydl.extract_info(search_url, download=False)
+            if not info or not info.get("entries"):
+                res["error"] = f"No channel found for '{company_name}'"
+                return res
+            first = info["entries"][0]
+            ch_id = first.get("channel_id") or first.get("uploader_id")
+            if not ch_id:
+                res["error"] = f"No channel found for '{company_name}'"
+                return res
     except Exception as e:
-        res["error"]=f"Error: {str(e)}"
+        res["error"] = f"Search failed: {str(e)}"
+        return res
+
+    # Fetch channel info + recent videos
+    channel_url = f"https://www.youtube.com/channel/{ch_id}/videos"
+    ydl_opts = {
+        "quiet": True, "no_warnings": True, "extract_flat": True,
+        "playlistend": 30, "skip_download": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ch_info = ydl.extract_info(channel_url, download=False)
+            if not ch_info:
+                res["error"] = "Could not fetch channel info"
+                return res
+
+            res["channel_id"] = ch_id
+            res["channel_title"] = ch_info.get("uploader") or ch_info.get("channel") or company_name
+            res["channel_url"] = ch_info.get("webpage_url") or channel_url
+            res["channel_thumbnail"] = ch_info.get("thumbnail") or ""
+            res["subscriber_count"] = _safe_int(ch_info.get("channel_follower_count", 0))
+            res["view_count"] = _safe_int(ch_info.get("view_count", 0))
+
+            entries = ch_info.get("entries") or []
+    except Exception as e:
+        res["error"] = f"Channel fetch failed: {str(e)}"
+        return res
+
+    # Process videos
+    if not entries:
+        res["error"] = f"No videos found for '{company_name}'"
+        return res
+
+    # Get detailed stats for each video
+    detailed_opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+    videos = []
+    for entry in entries[:20]:  # limit to 20 videos to stay fast
+        vid_id = entry.get("id") or entry.get("url", "").split("v=")[-1]
+        if not vid_id:
+            continue
+        try:
+            with yt_dlp.YoutubeDL(detailed_opts) as ydl:
+                vinfo = ydl.extract_info(f"https://www.youtube.com/watch?v={vid_id}", download=False)
+                if not vinfo:
+                    continue
+                pub_str = "N/A"
+                if vinfo.get("upload_date"):
+                    try:
+                        dt = datetime.strptime(vinfo["upload_date"], "%Y%m%d")
+                        pub_str = dt.strftime("%Y-%m-%d")
+                    except Exception:
+                        pass
+                views = _safe_int(vinfo.get("view_count", 0))
+                likes = _safe_int(vinfo.get("like_count", 0))
+                comments = _safe_int(vinfo.get("comment_count", 0))
+                eng = round((likes + comments) / views * 100, 2) if views > 0 else 0.0
+                videos.append({
+                    "video_id": vid_id,
+                    "title": vinfo.get("title", "Untitled"),
+                    "views": views, "likes": likes, "comments": comments,
+                    "engagement_rate": eng,
+                    "published": pub_str,
+                    "duration": vinfo.get("duration", 0),
+                    "thumbnail": vinfo.get("thumbnail", ""),
+                    "url": f"https://www.youtube.com/watch?v={vid_id}",
+                })
+        except Exception:
+            continue
+
+    res["videos"] = videos
+    res["video_count"] = len(videos)
+
+    if videos:
+        res["avg_views"] = int(sum(v["views"] for v in videos) / len(videos))
+        res["avg_likes"] = int(sum(v["likes"] for v in videos) / len(videos))
+        res["avg_comments"] = int(sum(v["comments"] for v in videos) / len(videos))
+
+        sorted_vids = sorted(videos, key=lambda v: v["views"], reverse=True)
+        res["top_videos"] = sorted_vids[:5]
+        res["topics"] = _extract_topics([v["title"] for v in videos])
+
+        # Upload frequency
+        dates = []
+        for v in videos:
+            try:
+                dates.append(datetime.strptime(v["published"], "%Y-%m-%d").replace(tzinfo=timezone.utc))
+            except Exception:
+                pass
+        if len(dates) >= 2:
+            dates.sort(reverse=True)
+            span = (dates[0] - dates[-1]).days or 1
+            res["upload_freq_per_week"] = round(len(dates) / (span / 7), 2)
+
     return res
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# YouTube Data API v3 based fetching (fallback or primary)
+# ─────────────────────────────────────────────────────────────────────────────
+def _fetch_via_api(company_name):
+    import requests as req
+
+    res = {
+        "company_name": company_name,
+        "channel_id": None, "channel_title": None, "channel_description": "",
+        "channel_url": None, "channel_thumbnail": None,
+        "subscriber_count": 0, "video_count": 0, "view_count": 0,
+        "country": "N/A", "created_at": "N/A",
+        "videos": [], "top_videos": [],
+        "avg_views": 0, "avg_likes": 0, "avg_comments": 0,
+        "upload_freq_per_week": 0, "topics": [], "error": None
+    }
+    if not API_KEY:
+        res["error"] = "YOUTUBE_API_KEY not set"
+        return res
+
+    def _get(endpoint, params):
+        params["key"] = API_KEY
+        r = req.get(f"{BASE}/{endpoint}", params=params, timeout=15)
+        if r.status_code != 200:
+            raise ValueError(f"API error {r.status_code}: {r.text[:200]}")
+        return r.json()
+
+    try:
+        sr = _get("search", {"part": "snippet", "q": company_name, "type": "channel", "maxResults": 1})
+        items = sr.get("items", [])
+        if not items:
+            res["error"] = f"No channel found for '{company_name}'"
+            return res
+        ch_id = items[0]["id"]["channelId"]
+        snippet = items[0]["snippet"]
+
+        ci = _get("channels", {"part": "snippet,statistics,contentDetails", "id": ch_id})
+        ch = ci["items"][0]
+        stats = ch.get("statistics", {})
+        res.update({
+            "channel_id": ch_id,
+            "channel_title": ch["snippet"].get("title", company_name),
+            "channel_description": ch["snippet"].get("description", ""),
+            "channel_url": f"https://www.youtube.com/channel/{ch_id}",
+            "channel_thumbnail": ch["snippet"].get("thumbnails", {}).get("default", {}).get("url", ""),
+            "subscriber_count": _safe_int(stats.get("subscriberCount", 0)),
+            "video_count": _safe_int(stats.get("videoCount", 0)),
+            "view_count": _safe_int(stats.get("viewCount", 0)),
+            "country": ch["snippet"].get("country", "N/A"),
+            "created_at": ch["snippet"].get("publishedAt", "N/A")[:10],
+        })
+
+        # Videos
+        uploads_id = ch.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads", "")
+        if uploads_id:
+            pv = _get("playlistItems", {"part": "contentDetails", "playlistId": uploads_id, "maxResults": 50})
+            vid_ids = [i["contentDetails"]["videoId"] for i in pv.get("items", [])]
+
+            for i in range(0, len(vid_ids), 50):
+                chunk = vid_ids[i:i+50]
+                vr = _get("videos", {"part": "statistics,snippet,contentDetails", "id": ",".join(chunk)})
+                for v in vr.get("items", []):
+                    s2 = v.get("statistics", {})
+                    views   = _safe_int(s2.get("viewCount", 0))
+                    likes   = _safe_int(s2.get("likeCount", 0))
+                    comments = _safe_int(s2.get("commentCount", 0))
+                    eng = round((likes + comments) / views * 100, 2) if views > 0 else 0.0
+                    pub = v["snippet"].get("publishedAt", "")[:10]
+                    thumb = v["snippet"].get("thumbnails", {}).get("medium", {}).get("url", "")
+                    res["videos"].append({
+                        "video_id": v["id"], "title": v["snippet"].get("title", ""),
+                        "views": views, "likes": likes, "comments": comments,
+                        "engagement_rate": eng, "published": pub,
+                        "duration": 0, "thumbnail": thumb,
+                        "url": f"https://www.youtube.com/watch?v={v['id']}",
+                    })
+
+        if res["videos"]:
+            res["avg_views"]    = int(sum(v["views"]    for v in res["videos"]) / len(res["videos"]))
+            res["avg_likes"]    = int(sum(v["likes"]    for v in res["videos"]) / len(res["videos"]))
+            res["avg_comments"] = int(sum(v["comments"] for v in res["videos"]) / len(res["videos"]))
+            res["top_videos"]   = sorted(res["videos"], key=lambda v: v["views"], reverse=True)[:5]
+            res["topics"]       = _extract_topics([v["title"] for v in res["videos"]])
+
+            dates = []
+            for v in res["videos"]:
+                try:
+                    dates.append(datetime.strptime(v["published"], "%Y-%m-%d").replace(tzinfo=timezone.utc))
+                except Exception:
+                    pass
+            if len(dates) >= 2:
+                dates.sort(reverse=True)
+                span = (dates[0] - dates[-1]).days or 1
+                res["upload_freq_per_week"] = round(len(dates) / (span / 7), 2)
+    except Exception as e:
+        res["error"] = str(e)
+
+    return res
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main entry point — tries API first, falls back to yt-dlp
+# ─────────────────────────────────────────────────────────────────────────────
+def fetch_company_data(company_name):
+    """Try YouTube Data API first; fall back to yt-dlp if quota exceeded."""
+    if API_KEY:
+        import requests as req
+        # Quick quota check
+        try:
+            r = req.get(f"{BASE}/search",
+                        params={"part": "snippet", "q": "test", "type": "channel",
+                                "maxResults": 1, "key": API_KEY}, timeout=5)
+            api_ok = r.status_code == 200
+        except Exception:
+            api_ok = False
+
+        if api_ok:
+            return _fetch_via_api(company_name)
+
+    # Fall back to yt-dlp (no quota)
+    try:
+        return _fetch_via_ytdlp(company_name)
+    except ImportError:
+        return _fetch_via_api(company_name)  # yt-dlp not installed, try API anyway
+
+
 def add_fmt(d):
-    for k in ["subscriber_count","video_count","view_count","avg_views","avg_likes","avg_comments"]:
-        d[f"{k}_fmt"] = _fmt(d[k])
+    d["subscriber_count_fmt"] = _fmt_num(d.get("subscriber_count", 0))
+    d["video_count_fmt"]      = _fmt_num(d.get("video_count", 0))
+    d["view_count_fmt"]       = _fmt_num(d.get("view_count", 0))
+    d["avg_views_fmt"]        = _fmt_num(d.get("avg_views", 0))
+    d["avg_likes_fmt"]        = _fmt_num(d.get("avg_likes", 0))
+    d["avg_comments_fmt"]     = _fmt_num(d.get("avg_comments", 0))
     return d
+
+
+def _rank_companies(results):
+    def safe(v): return v or 0
+    max_subs   = max((safe(r["subscriber_count"]) for r in results), default=1) or 1
+    max_views  = max((safe(r["avg_views"])        for r in results), default=1) or 1
+    max_freq   = max((safe(r["upload_freq_per_week"]) for r in results), default=1) or 1
+    max_eng    = max((safe(r.get("avg_engagement_rate", 0)) for r in results), default=1) or 1
+
+    scores = {}
+    for r in results:
+        eng = 0
+        if r["videos"]:
+            eng = sum(v["engagement_rate"] for v in r["videos"]) / len(r["videos"])
+        s = (
+            (safe(r["subscriber_count"]) / max_subs) * 30 +
+            (safe(r["avg_views"])        / max_views) * 30 +
+            (safe(r["upload_freq_per_week"]) / max_freq) * 20 +
+            (eng / (max_eng or 1)) * 20
+        )
+        scores[r["company_name"]] = round(s, 1)
+    return scores
