@@ -256,11 +256,8 @@ function rankEmoji(i){return['🥇','🥈','🥉','4️⃣','5️⃣'][i]||'•'
 function renderResults(results, yourCompany) {
   const sec = document.getElementById('results-section');
   sec.style.display='block';
-  sec.innerHTML='';
   const ranked = [...results].sort((a,b)=>b.score-a.score);
-  const names=results.map(d=>d.company_name);
-
-  // ── Build ALL html first, set innerHTML ONCE, then create charts ──
+  const names = results.map(d=>d.company_name);
   let html = '';
 
   // Company cards
@@ -288,7 +285,7 @@ function renderResults(results, yourCompany) {
   });
   html+='</div>';
 
-  // Charts section
+  // Charts
   html+=`<div class="divider"></div>
   <div class="section-title">📈 Data Visualisation</div>
   <div class="section-sub">Comparative metrics across all companies</div>
@@ -305,10 +302,10 @@ function renderResults(results, yourCompany) {
   <div class="section-sub">Top 5 videos by views for each company</div>`;
   results.forEach((d,ci)=>{
     if(!d.top_videos||!d.top_videos.length)return;
-    let tvHtml=`<div class="chart-card fade-in" style="margin-bottom:20px">
+    html+=`<div class="chart-card fade-in" style="margin-bottom:20px">
       <div class="chart-title" style="color:${COLORS[ci%COLORS.length]}">${d.company_name}</div>`;
     d.top_videos.forEach(v=>{
-      tvHtml+=`<div class="video-item">
+      html+=`<div class="video-item">
         <img class="video-thumb" src="${v.thumbnail||''}" onerror="this.style.display='none'"/>
         <div class="video-info">
           <div class="video-title"><a href="${v.url}" target="_blank" style="color:inherit;text-decoration:none">${v.title}</a></div>
@@ -322,27 +319,28 @@ function renderResults(results, yourCompany) {
         </div>
       </div>`;
     });
-    tvHtml+='</div>';
-    sec.innerHTML+=tvHtml;
+    html+='</div>';
   });
 
-  // ── Topics ─────────────────────────────────────────────
-  sec.innerHTML+=`<div class="divider"></div>
-  <div class="section-title">🏷️ Content Topics & Themes</div>
-  <div class="section-sub">Most frequent topics extracted from video titles</div>
-  <div class="chart-card fade-in" style="margin-bottom:40px"><div style="display:flex;flex-direction:column;gap:16px">`;
-  results.forEach(d=>{
-    const topics=d.topics||[];
-    sec.innerHTML+=`<div>
-      <span class="chip chip-company">${d.company_name}</span>
-      ${topics.map(t=>`<span class="chip">${t}</span>`).join('')||'<span style="color:var(--muted);font-size:13px">No data</span>'}
-    </div>`;
-  });
-  sec.innerHTML+='</div></div>';
+  // Topics — only companies with real topics
+  const withTopics=results.filter(d=>!d.error&&d.topics&&d.topics.length>0);
+  if(withTopics.length>0){
+    html+=`<div class="divider"></div>
+    <div class="section-title">🏷️ Content Topics & Themes</div>
+    <div class="section-sub">Most frequent topics extracted from video titles</div>
+    <div class="chart-card fade-in" style="margin-bottom:40px"><div style="display:flex;flex-direction:column;gap:16px">`;
+    withTopics.forEach(d=>{
+      html+=`<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+        <span class="chip chip-company">${d.company_name}</span>
+        ${d.topics.map(t=>`<span class="chip">${t}</span>`).join('')}
+      </div>`;
+    });
+    html+='</div></div>';
+  }
 
-  // ── Rankings ───────────────────────────────────────────
+  // Rankings
   const maxScore=Math.max(...ranked.map(d=>d.score))||100;
-  sec.innerHTML+=`<div class="divider"></div>
+  html+=`<div class="divider"></div>
   <div class="section-title">🏅 Final Rankings & Scorecard</div>
   <div class="section-sub">Composite score: Subscribers 30% · Avg Views 30% · Upload Frequency 20% · Engagement 20%</div>
   <div class="chart-card fade-in" style="margin-bottom:40px">
@@ -351,7 +349,7 @@ function renderResults(results, yourCompany) {
   </tr></thead><tbody>`;
   ranked.forEach((d,i)=>{
     const barW=Math.round((d.score/maxScore)*200);
-    sec.innerHTML+=`<tr>
+    html+=`<tr>
       <td class="rank-num">${rankEmoji(i)}</td>
       <td><strong>${d.company_name}</strong>${d.company_name===yourCompany?' <span style="font-size:11px;color:var(--accent)">(You)</span>':''}</td>
       <td><div class="score-bar-wrap"><div class="score-bar" style="width:${barW}px"></div><span>${d.score}</span></div></td>
@@ -360,10 +358,10 @@ function renderResults(results, yourCompany) {
       <td>${d.upload_freq_per_week}/wk</td>
     </tr>`;
   });
-  sec.innerHTML+='</tbody></table></div>';
+  html+='</tbody></table></div>';
 
-  // ── Download Banner ────────────────────────────────────
-  sec.innerHTML+=`<div class="download-banner fade-in">
+  // Download banner
+  html+=`<div class="download-banner fade-in">
     <div class="dl-text">
       <h3>📥 Download Full PowerPoint Report</h3>
       <p>Professional 10-slide deck with charts, analysis, and recommendations — ready to present to a client.</p>
