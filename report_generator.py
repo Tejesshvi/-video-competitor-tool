@@ -162,19 +162,40 @@ def slide_posting_frequency(prs, all_data):
     sl = prs.slides.add_slide(prs.slide_layouts[6])
     _bg(sl); _header_bar(sl,"Posting Frequency & Consistency","Who is most active and on what cadence")
     mx = max((d["upload_freq_per_week"] for d in all_data),default=1) or 1
-    bar_h = 4.5; bar_area_top=1.5; bar_w=1.2
-    total_w=len(all_data)*(bar_w+0.3)
-    start_x=(13.33-total_w)/2
+    
+    # Elegant sizing with plenty of breathing room at the top (avoiding header collision)
+    bar_h = 3.6         # Max height of bars (reduced from 4.5 to fit labels nicely)
+    bar_area_top = 2.2  # Top boundary (pushed down from 1.5 to leave 1.0 inch below header bar)
+    bar_w = 1.2         # Width of each bar
+    
+    total_w = len(all_data) * (bar_w + 0.4)
+    start_x = (13.33 - total_w) / 2
+    
+    # Draw a thin elegant baseline for the bar chart
+    baseline = sl.shapes.add_shape(1, Inches(start_x - 0.2), Inches(bar_area_top + bar_h), Inches(total_w), Inches(0.02))
+    _solid(baseline, GREY)
+    baseline.line.fill.background()
+    
     for i, d in enumerate(all_data):
-        x = start_x + i*(bar_w+0.3)
+        x = start_x + i * (bar_w + 0.4)
         val = d["upload_freq_per_week"]
-        h = max(0.2, (val/mx)*bar_h)
+        h = max(0.2, (val / mx) * bar_h)
         top = bar_area_top + (bar_h - h)
-        bar = sl.shapes.add_shape(1,Inches(x),Inches(top),Inches(bar_w),Inches(h))
-        colors=[BLUE,ACCENT,RGBColor(0xFF,0x6B,0x6B),RGBColor(0xFF,0xD9,0x3D),RGBColor(0xA2,0x9B,0xF5)]
-        _solid(bar, colors[i%len(colors)]); bar.line.fill.background()
-        _add_textbox(sl,f"{val}/wk",x,top-0.4,bar_w,0.35,12,True,WHITE,PP_ALIGN.CENTER)
-        _add_textbox(sl,d["company_name"],x,bar_area_top+bar_h+0.05,bar_w,0.4,10,True,WHITE,PP_ALIGN.CENTER)
+        
+        # Add the bar shape
+        bar = sl.shapes.add_shape(1, Inches(x), Inches(top), Inches(bar_w), Inches(h))
+        colors = [BLUE, ACCENT, RGBColor(0xFF,0x6B,0x6B), RGBColor(0xFF,0xD9,0x3D), RGBColor(0xA2,0x9B,0xF5)]
+        _solid(bar, colors[i % len(colors)])
+        bar.line.fill.background()
+        
+        # Format label (use decimal only if it is small, e.g. < 10)
+        val_lbl = f"{val:.2f}/wk" if val < 10 else f"{int(val)}/wk"
+        
+        # Value label above the bar (increased vertical spacing and uses Pt size 12)
+        _add_textbox(sl, val_lbl, x, top - 0.42, bar_w, 0.35, 12, True, WHITE, PP_ALIGN.CENTER)
+        
+        # Company name below the bar (with generous vertical padding)
+        _add_textbox(sl, d["company_name"], x, bar_area_top + bar_h + 0.12, bar_w, 0.4, 11, True, WHITE, PP_ALIGN.CENTER)
 
 def slide_engagement(prs, all_data):
     sl = prs.slides.add_slide(prs.slide_layouts[6])
