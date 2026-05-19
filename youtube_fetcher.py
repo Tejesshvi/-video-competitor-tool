@@ -2,7 +2,7 @@ import os, re, requests, isodate
 from datetime import datetime, timezone
 from collections import Counter
 
-API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
+API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyAFIGk-ALF8zMVgPBDvJJVcNWJF-mFjZ_g")
 BASE = "https://www.googleapis.com/youtube/v3"
 
 def _get(endpoint, params):
@@ -62,8 +62,6 @@ def fetch_company_data(company_name, max_videos=50):
            "subscriber_count":0,"video_count":0,"view_count":0,"country":"N/A",
            "created_at":"N/A","videos":[],"top_videos":[],"avg_views":0,"avg_likes":0,
            "avg_comments":0,"upload_freq_per_week":0,"topics":[],"error":None}
-    if not API_KEY:
-        res["error"] = "YOUTUBE_API_KEY not set"; return res
     try:
         si = search_channel(company_name)
         if not si: res["error"] = f"No channel found for '{company_name}'"; return res
